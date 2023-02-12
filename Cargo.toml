@@ -6,3 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+byte-strings = "0.2.2"
+anyhow = "1.0.69"
+
+[build-dependencies]
+bindgen = "0.53.1"
