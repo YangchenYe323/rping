@@ -23,22 +23,20 @@ type Result<'a, T> = core::result::Result<T, PingError<'a>>;
 /// let s2: &'static CStr = unsafe {
 ///   std::mem::transmute("src.com")
 /// };
-/// if let Err(e1) = p.add_host(s1) {
-///   if let Err(e2) = p.add_host(s2) {
-///     println!("{:?}", e2); // This use invalidates the borrow of e1 because the msg might be overwritten
-///     println!("{:?}", e1); // error!
-///   }
-/// }
+/// let r1 = p.add_host(s1);
+/// let r2 = p.add_host(s2); // Error! p is mutably borrowed by r1
+///
+/// println!("{:?}", r1);
 /// ```
 #[derive(Debug)]
 pub struct PingError<'a> {
   code: i32,
   // this points inside the Ping object.
-  msg: &'a mut CStr,
+  msg: &'a CStr,
 }
 
 impl<'a> PingError<'a> {
-  fn new(code: i32, msg: &'a mut CStr) -> Self {
+  fn new(code: i32, msg: &'a CStr) -> Self {
     Self { code, msg }
   }
 }
@@ -95,8 +93,7 @@ impl Ping {
         _ => {
           let ptr = ping_get_error(self.inner);
           let c_str = CStr::from_ptr(ptr);
-          let mut_c_str = (c_str as *const CStr as *mut CStr).as_mut().unwrap();
-          Err(PingError::new(ret, mut_c_str))
+          Err(PingError::new(ret, c_str))
         }
       }
     }
