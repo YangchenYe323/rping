@@ -5,7 +5,7 @@ use std::{
   mem::MaybeUninit,
 };
 
-use libc::IP_TOS;
+use libc::{IP_TOS, NI_MAXHOST};
 
 use crate::bindings::*;
 
@@ -142,6 +142,9 @@ impl Ping {
     }
   }
 
+  /// Send ICMP echo messages to all added host associated with self and block
+  /// waiting for responses until timeout.
+  /// Return the number of received echo messages on success.
   pub fn send(&mut self) -> Result<i32> {
     unsafe {
       let ret = ping_send(self.inner);
@@ -201,41 +204,77 @@ impl<'a> Iterator for PingIter<'a> {
   }
 }
 
-const INFO_BUFFER_SIZE: usize = 64;
+const INFO_BUFFER_SIZE: usize = 256;
 
 impl<'a> IterInfoHandle<'a> {
+  unsafe fn get_info_string(&self, info: i32) -> String {
+    // buf will hold data read from liboping
+    let buf = Box::new([MaybeUninit::<u8>::uninit(); INFO_BUFFER_SIZE]);
+    // buf_len will hold actually read data size or necessary data size of
+    // buf is not long enough
+    let buf_len: u64 = INFO_BUFFER_SIZE as u64;
+
+    let ret = ping_iterator_get_info(
+      self.inner,
+      info,
+      buf.as_ptr() as *const c_void as *mut c_void,
+      (&buf_len) as *const u64 as *mut u64,
+    );
+
+    // Shouldn't return error
+    debug_assert_ne!(libc::EINVAL, ret);
+
+    // todo(yangchen): Reallocate a larger buffer?
+    assert!(
+      buf_len <= INFO_BUFFER_SIZE as u64,
+      "Buffer Too Short, Needed {} Bytes",
+      buf_len
+    );
+
+    // Assemble the received bytes into a string.
+    let buf = Box::leak(buf);
+    let str = buf.as_ptr() as *mut u8;
+    let str_len = buf_len - 1; // Omit the trailing null
+
+    String::from_raw_parts(str, str_len as usize, INFO_BUFFER_SIZE)
+  }
+
+  unsafe fn get_info_double(&self, info: i32) -> f64 {
+    let buf: f64 = 0.0;
+    let buf_len: u64 = 64;
+    let ret = ping_iterator_get_info(
+      self.inner,
+      info,
+      (&buf) as *const f64 as *const c_void as *mut c_void,
+      (&buf_len) as *const u64 as *mut u64,
+    );
+
+    assert_ne!(libc::EINVAL, ret);
+    buf
+  }
+
   /// Get the user-supplied hostname associated with this host.
   /// This is guaranteed to be equal to user-supplied argument to
   /// `Ping::add_host` without the trailing \0.
   ///
   pub fn get_hostname_user(&self) -> String {
-    unsafe {
-      // First try a moderate sized buffer.
-      let buf = Box::new([0u8; INFO_BUFFER_SIZE]);
-      let buf_len: u64 = INFO_BUFFER_SIZE as u64;
+    unsafe { self.get_info_string(PING_INFO_USERNAME as i32) }
+  }
 
-      let ret = ping_iterator_get_info(
-        self.inner,
-        PING_INFO_USERNAME as i32,
-        buf.as_ptr() as *const c_void as *mut c_void,
-        (&buf_len) as *const u64 as *mut u64,
-      );
+  /// Get the system-parsed hostname associated with the host.
+  /// this might not equal the user-supplied name and is looked up
+  /// every time this function is called.
+  ///
+  pub fn get_hostname(&self) -> String {
+    unsafe { self.get_info_string(PING_INFO_HOSTNAME as i32) }
+  }
 
-      // Shouldn't return error
-      debug_assert_ne!(libc::EINVAL, ret);
-
-      // If the buffer is not long enough, panic,
-      // todo(yangchen): Reallocate a larger buffer?
-      if buf_len >= INFO_BUFFER_SIZE as u64 {
-        panic!("Buffer Too Short, Needed {} Bytes", buf_len);
-      }
-
-      let buf = Box::leak(buf);
-      let str = buf.as_ptr() as *const u8 as *mut u8;
-      let str_len = buf_len - 1; // Omit the trailing null
-
-      String::from_raw_parts(str, str_len as usize, INFO_BUFFER_SIZE)
-    }
+  /// Get the last measured latency of receiving an echo response from
+  /// the associated host measured in milliseconds.
+  /// Result is negative if timeout occured in between.
+  ///
+  pub fn get_latency(&self) -> f64 {
+    unsafe { self.get_info_double(PING_INFO_LATENCY as i32) }
   }
 }
 
