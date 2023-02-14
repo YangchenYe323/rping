@@ -1,4 +1,11 @@
-use std::ffi::CStr;
+use core::ffi::c_size_t;
+use std::{
+  ffi::{c_void, CStr},
+  marker::PhantomData,
+  mem::MaybeUninit,
+};
+
+use libc::IP_TOS;
 
 use crate::bindings::*;
 
@@ -125,6 +132,16 @@ impl Ping {
       self.map_err(ret)
     }
   }
+
+  /// Returns a [PingIter] object for iterating over all the associated host
+  /// and get information.
+  ///
+  pub fn iter(&self) -> PingIter<'_> {
+    PingIter {
+      inner: unsafe { ping_iterator_get(self.inner) },
+      _phantom: Default::default(),
+    }
+  }
 }
 
 impl Default for Ping {
@@ -140,6 +157,68 @@ impl Drop for Ping {
     // during its lifetime.
     unsafe {
       ping_destroy(self.inner);
+    }
+  }
+}
+
+/// Immutable Iterator Type for [Ping],
+#[derive(Debug)]
+pub struct PingIter<'a> {
+  inner: *mut pingobj_iter_t,
+  _phantom: PhantomData<&'a ()>,
+}
+
+#[derive(Debug)]
+pub struct IterInfoHandle<'a> {
+  inner: *mut pingobj_iter_t,
+  _phantom: PhantomData<&'a ()>,
+}
+
+impl<'a> Iterator for PingIter<'a> {
+  type Item = IterInfoHandle<'a>;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    unsafe {
+      let n = ping_iterator_next(self.inner);
+      if n.is_null() {
+        None
+      } else {
+        self.inner = n;
+        Some(IterInfoHandle {
+          inner: n,
+          _phantom: Default::default(),
+        })
+      }
+    }
+  }
+}
+
+const INFO_BUFFER_SIZE: usize = 1024;
+
+impl<'a> IterInfoHandle<'a> {
+  pub fn get_hostname_user(&self) -> String {
+    unsafe {
+      let buf: [MaybeUninit<u8>; INFO_BUFFER_SIZE] = [MaybeUninit::uninit(); INFO_BUFFER_SIZE];
+      let buf_len: u64 = INFO_BUFFER_SIZE as u64;
+
+      let ret = ping_iterator_get_info(
+        self.inner,
+        PING_INFO_USERNAME as i32,
+        (&buf) as *const MaybeUninit<u8> as *const c_void as *mut c_void,
+        (&buf_len) as *const u64 as *mut u64,
+      );
+
+      // Shouldn't return error
+      debug_assert_ne!(libc::EINVAL, ret);
+
+      // If the buffer is not long enough, panic,
+      // todo(yangchen) we could do better here.
+      if buf_len != INFO_BUFFER_SIZE as u64 {
+        panic!("Buffer Too Short");
+      }
+
+      let c_str: &CStr = CStr::from_ptr(&buf as *const MaybeUninit<u8> as *const i8);
+      c_str.to_str().unwrap().to_string()
     }
   }
 }

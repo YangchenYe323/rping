@@ -284,6 +284,7 @@ dependencies = [
  "anyhow",
  "bindgen",
  "byte-strings",
+ "libc",
 ]
 
 [[package]]

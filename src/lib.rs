@@ -2,7 +2,6 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 #![allow(clippy::uninlined_format_args)]
 #![allow(dead_code)] // todo(yangchen): remove these after work finished
