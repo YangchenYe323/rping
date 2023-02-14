@@ -103,13 +103,12 @@ impl Ping {
   }
 
   unsafe fn map_err(&mut self, ret: i32) -> Result<()> {
-    match ret {
-      0 => Ok(()),
-      _ => {
-        let ptr = ping_get_error(self.inner);
-        let c_str = CStr::from_ptr(ptr);
-        Err(PingError::new(c_str))
-      }
+    if ret >= 0 {
+      Ok(())
+    } else {
+      let ptr = ping_get_error(self.inner);
+      let c_str = CStr::from_ptr(ptr);
+      Err(PingError::new(c_str))
     }
   }
 
@@ -140,6 +139,14 @@ impl Ping {
     PingIter {
       inner: unsafe { ping_iterator_get(self.inner) },
       _phantom: Default::default(),
+    }
+  }
+
+  pub fn send(&mut self) -> Result<i32> {
+    unsafe {
+      let ret = ping_send(self.inner);
+      self.map_err(ret)?;
+      Ok(ret)
     }
   }
 }
@@ -180,31 +187,37 @@ impl<'a> Iterator for PingIter<'a> {
   fn next(&mut self) -> Option<Self::Item> {
     unsafe {
       let n = ping_iterator_next(self.inner);
-      if n.is_null() {
+      if self.inner.is_null() {
         None
       } else {
-        self.inner = n;
-        Some(IterInfoHandle {
-          inner: n,
+        let handle = Some(IterInfoHandle {
+          inner: self.inner,
           _phantom: Default::default(),
-        })
+        });
+        self.inner = n;
+        handle
       }
     }
   }
 }
 
-const INFO_BUFFER_SIZE: usize = 1024;
+const INFO_BUFFER_SIZE: usize = 64;
 
 impl<'a> IterInfoHandle<'a> {
+  /// Get the user-supplied hostname associated with this host.
+  /// This is guaranteed to be equal to user-supplied argument to
+  /// `Ping::add_host` without the trailing \0.
+  ///
   pub fn get_hostname_user(&self) -> String {
     unsafe {
-      let buf: [MaybeUninit<u8>; INFO_BUFFER_SIZE] = [MaybeUninit::uninit(); INFO_BUFFER_SIZE];
+      // First try a moderate sized buffer.
+      let buf = Box::new([0u8; INFO_BUFFER_SIZE]);
       let buf_len: u64 = INFO_BUFFER_SIZE as u64;
 
       let ret = ping_iterator_get_info(
         self.inner,
         PING_INFO_USERNAME as i32,
-        (&buf) as *const MaybeUninit<u8> as *const c_void as *mut c_void,
+        buf.as_ptr() as *const c_void as *mut c_void,
         (&buf_len) as *const u64 as *mut u64,
       );
 
@@ -212,13 +225,16 @@ impl<'a> IterInfoHandle<'a> {
       debug_assert_ne!(libc::EINVAL, ret);
 
       // If the buffer is not long enough, panic,
-      // todo(yangchen) we could do better here.
-      if buf_len != INFO_BUFFER_SIZE as u64 {
-        panic!("Buffer Too Short");
+      // todo(yangchen): Reallocate a larger buffer?
+      if buf_len >= INFO_BUFFER_SIZE as u64 {
+        panic!("Buffer Too Short, Needed {} Bytes", buf_len);
       }
 
-      let c_str: &CStr = CStr::from_ptr(&buf as *const MaybeUninit<u8> as *const i8);
-      c_str.to_str().unwrap().to_string()
+      let buf = Box::leak(buf);
+      let str = buf.as_ptr() as *const u8 as *mut u8;
+      let str_len = buf_len - 1; // Omit the trailing null
+
+      String::from_raw_parts(str, str_len as usize, INFO_BUFFER_SIZE)
     }
   }
 }
@@ -242,5 +258,19 @@ mod tests {
 
     p.add_host(host).unwrap();
     p.remove_host(host).unwrap();
+  }
+
+  #[test]
+  fn test_send() {
+    let mut p = Ping::new();
+    let host = c!("google.com");
+    p.add_host(host).unwrap();
+    assert_eq!(1, p.send().unwrap());
+
+    let mut iter = p.iter();
+    println!("{:?}", iter);
+    let handle = iter.next().unwrap();
+    let c = handle.get_hostname_user();
+    assert_eq!("google.com", c);
   }
 }
