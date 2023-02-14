@@ -47,14 +47,13 @@ type Result<'a, T> = core::result::Result<T, PingError<'a>>;
 /// }
 #[derive(Debug)]
 pub struct PingError<'a> {
-  code: i32,
   // this points inside the Ping object.
   msg: &'a CStr,
 }
 
 impl<'a> PingError<'a> {
-  fn new(code: i32, msg: &'a CStr) -> Self {
-    Self { code, msg }
+  fn new(msg: &'a CStr) -> Self {
+    Self { msg }
   }
 }
 
@@ -96,23 +95,34 @@ impl Ping {
     }
   }
 
-  /// Add a hosts to the current ping object so that it can be pinned simultaneously with
+  unsafe fn map_err(&mut self, ret: i32) -> Result<()> {
+    match ret {
+      0 => Ok(()),
+      _ => {
+        let ptr = ping_get_error(self.inner);
+        let c_str = CStr::from_ptr(ptr);
+        Err(PingError::new(c_str))
+      }
+    }
+  }
+
+  /// Add a host to the current ping object so that it can be pinged simultaneously with
   /// all added hosts.
   ///
-  /// * `self` - current [Ping] object
-  /// * `host_name` - Host name of the target to ping
   pub fn add_host(&mut self, host_name: impl AsRef<CStr>) -> Result<()> {
     unsafe {
       let ret = ping_host_add(self.inner, host_name.as_ref().as_ptr());
+      self.map_err(ret)
+    }
+  }
 
-      match ret {
-        0 => Ok(()),
-        _ => {
-          let ptr = ping_get_error(self.inner);
-          let c_str = CStr::from_ptr(ptr);
-          Err(PingError::new(ret, c_str))
-        }
-      }
+  /// Remove a host from the lists to be pinged.
+  /// Returns error if the host is not resolved or not found.
+  ///
+  pub fn remove_host(&mut self, host_name: impl AsRef<CStr>) -> Result<()> {
+    unsafe {
+      let ret = ping_host_remove(self.inner, host_name.as_ref().as_ptr());
+      self.map_err(ret)
     }
   }
 }
@@ -143,5 +153,15 @@ mod tests {
   fn it_works() {
     let mut p = Ping::new();
     p.add_host(c!("google.com")).unwrap();
+  }
+
+  #[test]
+  fn err_remove_nonexistent() {
+    let mut p = Ping::new();
+    let host = c!("google.com");
+    assert!(p.remove_host(host).is_err());
+
+    p.add_host(host).unwrap();
+    p.remove_host(host).unwrap();
   }
 }
