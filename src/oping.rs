@@ -207,12 +207,16 @@ impl<'a> Iterator for PingIter<'a> {
 const INFO_BUFFER_SIZE: usize = 256;
 
 impl<'a> IterInfoHandle<'a> {
-  unsafe fn get_info_string(&self, info: i32) -> String {
+  /// Get a hostname from the handle stored as a string.
+  unsafe fn get_info_string(&self, info: i32, size_hint: usize) -> String {
     // buf will hold data read from liboping
-    let buf = Box::new([MaybeUninit::<u8>::uninit(); INFO_BUFFER_SIZE]);
+    let mut vec = Vec::with_capacity(size_hint);
+    vec.resize(size_hint, MaybeUninit::<u8>::uninit());
+    let buf = vec.into_boxed_slice();
+
     // buf_len will hold actually read data size or necessary data size of
     // buf is not long enough
-    let buf_len: u64 = INFO_BUFFER_SIZE as u64;
+    let buf_len: u64 = size_hint as u64;
 
     let ret = ping_iterator_get_info(
       self.inner,
@@ -226,7 +230,7 @@ impl<'a> IterInfoHandle<'a> {
 
     // todo(yangchen): Reallocate a larger buffer?
     assert!(
-      buf_len <= INFO_BUFFER_SIZE as u64,
+      buf_len <= size_hint as u64,
       "Buffer Too Short, Needed {} Bytes",
       buf_len
     );
@@ -236,6 +240,12 @@ impl<'a> IterInfoHandle<'a> {
     let str = buf.as_ptr() as *mut u8;
     let str_len = buf_len - 1; // Omit the trailing null
 
+    // SAFETY:
+    // 1. str comes from buf, which is allocated by rust allocator.
+    // 2. capacity is correct as we allocated it explicitly.
+    // 3. the first str_len bytes are guaranteed to be valid utf-8 because hostnames can only
+    // contain valid utf-8 characters: https://www.rfc-editor.org/rfc/rfc952
+    // Invalid hostnames are guaranteed to be rejected by `add_host`
     String::from_raw_parts(str, str_len as usize, INFO_BUFFER_SIZE)
   }
 
@@ -253,12 +263,26 @@ impl<'a> IterInfoHandle<'a> {
     buf
   }
 
+  unsafe fn get_info_int(&self, info: i32) -> i32 {
+    let buf: i32 = 0;
+    let buf_len: u64 = 32;
+    let ret = ping_iterator_get_info(
+      self.inner,
+      info,
+      (&buf) as *const i32 as *const c_void as *mut c_void,
+      (&buf_len) as *const u64 as *mut u64,
+    );
+
+    assert_ne!(libc::EINVAL, ret);
+    buf
+  }
+
   /// Get the user-supplied hostname associated with this host.
   /// This is guaranteed to be equal to user-supplied argument to
   /// `Ping::add_host` without the trailing \0.
   ///
   pub fn get_hostname_user(&self) -> String {
-    unsafe { self.get_info_string(PING_INFO_USERNAME as i32) }
+    unsafe { self.get_info_string(PING_INFO_USERNAME as i32, libc::NI_MAXHOST as usize) }
   }
 
   /// Get the system-parsed hostname associated with the host.
@@ -266,7 +290,13 @@ impl<'a> IterInfoHandle<'a> {
   /// every time this function is called.
   ///
   pub fn get_hostname(&self) -> String {
-    unsafe { self.get_info_string(PING_INFO_HOSTNAME as i32) }
+    unsafe { self.get_info_string(PING_INFO_HOSTNAME as i32, libc::NI_MAXHOST as usize) }
+  }
+
+  /// Get the IP address in ASCII format of the associated host.
+  ///
+  pub fn get_address(&self) -> String {
+    unsafe { self.get_info_string(PING_INFO_ADDRESS as i32, 40) }
   }
 
   /// Get the last measured latency of receiving an echo response from
@@ -287,6 +317,16 @@ mod tests {
   fn it_works() {
     let mut p = Ping::new();
     p.add_host(c!("google.com")).unwrap();
+  }
+
+  #[test]
+  fn reject_invalid_encoding() {
+    let mut p = Ping::new();
+    // Invalid encodings for hostname should be rejected
+    let host: [i8; 4] = [b'a' as i8, -2, -3, 0];
+    let cstr = unsafe { CStr::from_ptr(host.as_ptr() as *const i8) };
+    let res = p.add_host(cstr);
+    assert!(res.is_err());
   }
 
   #[test]
@@ -311,5 +351,18 @@ mod tests {
     let handle = iter.next().unwrap();
     let c = handle.get_hostname_user();
     assert_eq!("google.com", c);
+  }
+
+  #[test]
+  fn test_address() {
+    let mut p = Ping::new();
+    let host = c!("localhost");
+    p.add_host(host).unwrap();
+    assert_eq!(1, p.send().unwrap());
+
+    let mut iter = p.iter();
+    let handle = iter.next().unwrap();
+    let c = handle.get_address();
+    assert!(c.starts_with("127.0.0.1"));
   }
 }
