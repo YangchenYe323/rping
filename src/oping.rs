@@ -5,6 +5,7 @@ use std::{
   mem::MaybeUninit,
 };
 
+use enum_repr::EnumRepr;
 use libc::{IP_TOS, NI_MAXHOST};
 
 use crate::bindings::*;
@@ -42,13 +43,13 @@ type Result<'a, T> = core::result::Result<T, PingError<'a>>;
 ///
 /// ## Example
 /// ```compile_fail
-/// fn main() -> Result<(), Box<dyn Error>> {
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///   use rping::Ping;
 ///   use std::ffi::CStr;
 ///   let mut p = Ping::new();
 ///   let s: &'static CStr = unsafe {
-///     std::mem::transmute("github.com");
-///   }
+///     std::mem::transmute("github.com")
+///   };
 ///   p.add_host(s)?; // Error! The PingError cannot be propogated outside of the function after p gets dropped.
 ///   Ok(())
 /// }
@@ -306,6 +307,52 @@ impl<'a> IterInfoHandle<'a> {
   pub fn get_latency(&self) -> f64 {
     unsafe { self.get_info_double(PING_INFO_LATENCY as i32) }
   }
+
+  /// Get the address family of the associated host, either IPv4 or IPv6.
+  ///
+  pub fn get_addr_family(&self) -> AddrFamily {
+    unsafe { AddrFamily::from_repr(self.get_info_int(PING_INFO_FAMILY as i32)).unwrap() }
+  }
+
+  /// Get the number of dropped echo messages before timeout.
+  ///
+  pub fn get_num_dropped(&self) -> u32 {
+    unsafe { std::mem::transmute(self.get_info_int(PING_INFO_DATA as i32)) }
+  }
+
+  /// Return the sequence number of the last ICMP echo message sent to this
+  /// associated host.
+  ///
+  pub fn get_sequence(&self) -> i32 {
+    unsafe { self.get_info_int(PING_INFO_SEQUENCE as i32) }
+  }
+
+  /// Return the identifier of all the ICMP echos sent to this
+  /// associated host.
+  ///
+  pub fn get_identifier(&self) -> i32 {
+    unsafe { self.get_info_int(PING_INFO_IDENT as i32) }
+  }
+
+  /// Return the ttl(time to live) field of received ICMP message.
+  /// This has no connection to the ttl option we set.
+  ///
+  pub fn get_received_ttl(&self) -> i32 {
+    unsafe { self.get_info_int(PING_INFO_RECV_TTL as i32) }
+  }
+
+  /// Return the qos of received ICMP message.
+  ///
+  pub fn get_received_qos(&self) -> u8 {
+    unsafe { self.get_info_int(PING_INFO_RECV_QOS as i32) as u8 }
+  }
+}
+
+#[derive(Debug, PartialEq)]
+#[EnumRepr(type = "i32")]
+pub enum AddrFamily {
+  IPV4 = libc::AF_INET,
+  IPV6 = libc::AF_INET6,
 }
 
 #[cfg(test)]
@@ -347,7 +394,6 @@ mod tests {
     assert_eq!(1, p.send().unwrap());
 
     let mut iter = p.iter();
-    println!("{:?}", iter);
     let handle = iter.next().unwrap();
     let c = handle.get_hostname_user();
     assert_eq!("google.com", c);
@@ -364,5 +410,31 @@ mod tests {
     let handle = iter.next().unwrap();
     let c = handle.get_address();
     assert!(c.starts_with("127.0.0.1"));
+  }
+
+  #[test]
+  fn test_family() {
+    let mut p = Ping::new();
+    let host = c!("localhost");
+    p.add_host(host).unwrap();
+    assert_eq!(1, p.send().unwrap());
+
+    let mut iter = p.iter();
+    let handle = iter.next().unwrap();
+    let c = handle.get_addr_family();
+    assert_eq!(AddrFamily::IPV4, c);
+  }
+
+  #[test]
+  fn test_dropped() {
+    let mut p = Ping::new();
+    let host = c!("localhost");
+    p.add_host(host).unwrap();
+    assert_eq!(1, p.send().unwrap());
+
+    let mut iter = p.iter();
+    let handle = iter.next().unwrap();
+    let c = handle.get_num_dropped();
+    assert_eq!(0, c);
   }
 }
