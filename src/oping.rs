@@ -389,14 +389,14 @@ mod tests {
   #[test]
   fn test_send() {
     let mut p = Ping::new();
-    let host = c!("google.com");
+    let host = c!("localhost");
     p.add_host(host).unwrap();
     assert_eq!(1, p.send().unwrap());
 
     let mut iter = p.iter();
     let handle = iter.next().unwrap();
     let c = handle.get_hostname_user();
-    assert_eq!("google.com", c);
+    assert_eq!("localhost", c);
   }
 
   #[test]
