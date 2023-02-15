@@ -11,26 +11,26 @@ jobs:
     name: Check
     runs-on: ubuntu-latest
     steps:
+      - name: Install liboping
+        run: sudo apt-get install -y liboping-dev
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: nightly
           override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
+      - run: cargo +nightly check
 
   test:
     name: Test Suite
     runs-on: ubuntu-latest
     steps:
+      - name: Install liboping
+        run: sudo apt-get install -y liboping-dev
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: nightly
           override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
+      - run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER='sudo -E' cargo test

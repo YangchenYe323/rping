@@ -3,7 +3,9 @@ use std::path::PathBuf;
 fn main() {
   // todo(yangchen): Change the hard-coded path
   println!("cargo:rustc-link-lib=dylib=oping");
-  println!("cargo:rustc-link-search=native=/usr/local/Cellar/liboping/1.10.0/lib");
+  if std::env::consts::OS == "mac" {
+    println!("cargo:rustc-link-search=native=/usr/local/Cellar/liboping/1.10.0/lib");
+  }
 
   println!("cargo:rerun-if-changed=wrapper.h");
 
