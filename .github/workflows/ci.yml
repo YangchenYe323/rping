@@ -33,4 +33,4 @@ jobs:
           profile: minimal
           toolchain: nightly
           override: true
-      - run: CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER='sudo -E' cargo test
+      - run: cargo +nightly test
