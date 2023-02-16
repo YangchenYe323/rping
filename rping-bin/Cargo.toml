@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 rping = { version = "*", path = "../" }
+clap = { version = "4.1.6", features = ["derive"] }
