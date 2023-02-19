@@ -2,10 +2,6 @@ use std::path::PathBuf;
 
 fn main() {
   println!("cargo:rustc-link-lib=dylib=oping");
-  if std::env::consts::OS == "mac" {
-    println!("cargo:rustc-link-search=native=/usr/local/lib");
-  }
-
   println!("cargo:rerun-if-changed=wrapper.h");
 
   let bindings = bindgen::Builder::default()
