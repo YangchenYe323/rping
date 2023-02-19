@@ -8,7 +8,7 @@ name: Continuous integration
 
 jobs:
   check:
-    name: Check
+    name: Linux-Check
     runs-on: ubuntu-latest
     steps:
       - name: Install liboping
@@ -21,12 +21,40 @@ jobs:
           override: true
       - run: cargo +nightly check
 
+  mac-check:
+    name: MacOS-Check
+    runs-on: macos-latest
+    steps:
+      - name: Install liboping
+        run: brew install liboping
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+      - run: cargo +nightly check
+
   test:
-    name: Test Suite
+    name: Linux-Test
     runs-on: ubuntu-latest
     steps:
       - name: Install liboping
         run: sudo apt-get install -y liboping-dev
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+      - run: cargo +nightly test
+
+  mac-test:
+    name: MacOS-Test
+    runs-on: macos-latest
+    steps:
+      - name: Install liboping
+        run: brew install liboping
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
