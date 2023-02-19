@@ -1,4 +1,3 @@
-use core::ffi::c_size_t;
 use std::{
   ffi::{c_void, CStr},
   marker::PhantomData,
@@ -6,7 +5,6 @@ use std::{
 };
 
 use enum_repr::EnumRepr;
-use libc::{IP_TOS, NI_MAXHOST};
 
 use crate::bindings::*;
 
@@ -56,12 +54,12 @@ type Result<'a, T> = core::result::Result<T, PingError<'a>>;
 #[derive(Debug)]
 pub struct PingError<'a> {
   // this points inside the Ping object.
-  msg: &'a CStr,
+  _msg: &'a CStr,
 }
 
 impl<'a> PingError<'a> {
   fn new(msg: &'a CStr) -> Self {
-    Self { msg }
+    Self { _msg: msg }
   }
 }
 
